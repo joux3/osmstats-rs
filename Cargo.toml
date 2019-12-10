@@ -1,0 +1,16 @@
+[package]
+name = "osmstats"
+version = "0.1.0"
+authors = ["joux3"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+quick-protobuf = "0.6.2"
+memmap = "0.7"
+byteorder = "1.3.2"
+flate2 = "1.0"
+crossbeam-channel = "0.4"
+crossbeam-utils = "0.7"
+jemallocator = "0.3.2"

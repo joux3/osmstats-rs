@@ -1,0 +1,54 @@
+osmstats $ time ./osmconvert --out-statistics france-latest.osm.pbf 
+timestamp min: 2005-07-05T03:32:35Z
+timestamp max: 2019-12-09T21:16:51Z
+lon min: -20.0332000
+lon max: 16.2213537
+lat min: 35.2703450
+lat max: 62.5146553
+nodes: 411952831
+ways: 60051799
+relations: 588829
+node id min: 122626
+node id max: 7045028260
+way id min: 2569
+way id max: 754090640
+relation id min: 2466
+relation id max: 10391773
+keyval pairs max: 475
+keyval pairs max object: relation 52411
+noderefs max: 2000
+noderefs max object: way 42030857
+relrefs max: 4786
+relrefs max object: relation 5934469
+
+purgen jälkeen
+real	0m50.127s
+user	0m47.758s
+sys	0m1.165s
+yhden ajon jälkeen
+real	0m48.060s
+
+osmstats-using-lib $ time ./target/release/osmstats-using-lib ../osmstats/france-latest.osm.pbf 
+counting objects...
+411952831 nodes, mean coord: 46.62933957679009, 2.378062245274637.
+60051799 ways, mean |nodes|: 9.081661350395182
+588829 relations, mean |references|: 14.95613327468586
+
+real	2m18.147s
+user	7m15.758s
+sys	1m17.781s
+
+osmstats $ time ./target/release/osmstats france-latest.osm.pbf 
+jeee string tables total size 17165185
+
+real	0m43.016s
+user	2m39.379s
+sys	0m6.802s
+
+jemalloc + raw decompress + isompi queue
+osmstats $ time ./target/release/osmstats france-latest.osm.pbf 
+jeee string tables total size 17165185
+
+real	0m26.738s
+user	1m43.926s
+sys	0m3.128s
