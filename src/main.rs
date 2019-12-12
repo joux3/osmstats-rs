@@ -37,7 +37,7 @@ fn do_processing(filename: &std::ffi::OsStr) -> Result<String, String> {
     let bytes = &mmap[..];
     let mut reader = BytesReader::from_bytes(&bytes);
     let mut sent_messages = 0;
-    let (sender, receiver) = bounded::<Option<Blob>>(WORK_BOUND);
+    let (sender, receiver) = bounded::<Blob>(WORK_BOUND);
     let (return_sender, return_received) = unbounded::<u64>();
 
     thread::scope(|s| {
@@ -47,19 +47,18 @@ fn do_processing(filename: &std::ffi::OsStr) -> Result<String, String> {
             s.spawn(move |_| {
                 let mut buffer = Vec::with_capacity(OUTPUT_BUF_SIZE as usize);
                 loop {
-                    let blob_opt = cloned_receiver.recv().unwrap();
-                    if blob_opt.is_some() {
-                        let blob = blob_opt.unwrap();
-                        if blob.raw_size.unwrap_or(0) > OUTPUT_BUF_SIZE {
-                            panic!("got a blob with too large output size!");
+                    match cloned_receiver.recv() {
+                        Ok(blob) => {
+                            if blob.raw_size.unwrap_or(0) > OUTPUT_BUF_SIZE {
+                                panic!("got a blob with too large output size!");
+                            }
+                            let size = handle_block(&blob, &mut buffer);
+                            buffer.clear();
+                            cloned_return_sender
+                                .send(size as u64)
+                                .expect("failed to send size result");
                         }
-                        let size = handle_block(&blob, &mut buffer);
-                        buffer.clear();
-                        cloned_return_sender
-                            .send(size as u64)
-                            .expect("failed to send size result");
-                    } else {
-                        break;
+                        Err(_e) => break,
                     }
                 }
             });
@@ -88,13 +87,11 @@ fn do_processing(filename: &std::ffi::OsStr) -> Result<String, String> {
 
             if blob_header.type_pb == "OSMData" {
                 sent_messages += 1;
-                sender.send(Some(blob)).expect("failed to send blob");
+                sender.send(blob).expect("failed to send blob");
             }
         }
 
-        for _ in 0..THREAD_COUNT {
-            sender.send(None).expect("failed to send None");
-        }
+        drop(sender);
 
         let mut received_messages = 0;
         let mut sizes = 0;
