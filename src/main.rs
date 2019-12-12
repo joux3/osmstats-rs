@@ -16,7 +16,8 @@ static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
 const WORK_BOUND: usize = 4000;
 const THREAD_COUNT: i64 = 4;
-const OUTPUT_BUF_SIZE: i32 = 10_485_760;
+const MAX_COMPRESSED_BLOB_SIZE: i32 = 64 * 1024;
+const MAX_DECOMPRESSED_BLOB_SIZE: i32 = 32 * 1024 * 1024;
 
 fn main() {
     let args: Vec<_> = std::env::args_os().collect();
@@ -45,13 +46,10 @@ fn do_processing(filename: &std::ffi::OsStr) -> Result<String, String> {
             let cloned_receiver = receiver.clone();
             let cloned_return_sender = return_sender.clone();
             s.spawn(move |_| {
-                let mut buffer = Vec::with_capacity(OUTPUT_BUF_SIZE as usize);
+                let mut buffer = Vec::with_capacity(MAX_DECOMPRESSED_BLOB_SIZE as usize);
                 loop {
                     match cloned_receiver.recv() {
                         Ok(blob) => {
-                            if blob.raw_size.unwrap_or(0) > OUTPUT_BUF_SIZE {
-                                panic!("got a blob with too large output size!");
-                            }
                             let size = handle_block(&blob, &mut buffer);
                             buffer.clear();
                             cloned_return_sender
@@ -65,13 +63,13 @@ fn do_processing(filename: &std::ffi::OsStr) -> Result<String, String> {
         }
 
         loop {
-            let header_size = match reader.read_fixed32(bytes).map(|value| {
+            let header_size = match reader.read_sfixed32(bytes).map(|value| {
                 let mut buf = [0; 4];
-                LittleEndian::write_u32(&mut buf, value);
-                BigEndian::read_u32(&buf)
+                LittleEndian::write_i32(&mut buf, value);
+                BigEndian::read_i32(&buf)
             }) {
-                Ok(size) if size > 64 * 1024 => {
-                    return Err("invalid data, blob too large".to_string())
+                Ok(size) if size > MAX_COMPRESSED_BLOB_SIZE => {
+                    return Err("invalid data, compressed blob too large".to_string())
                 }
                 Ok(size) => size,
                 Err(_e) => break,
@@ -84,6 +82,10 @@ fn do_processing(filename: &std::ffi::OsStr) -> Result<String, String> {
             let blob = reader
                 .read_message_by_len::<Blob>(bytes, blob_header.datasize as usize)
                 .expect("failed to read blob");
+
+            if blob.raw_size.unwrap_or(0) > MAX_DECOMPRESSED_BLOB_SIZE {
+                return Err("invalid data, uncompressed blob too large".to_string());
+            }
 
             if blob_header.type_pb == "OSMData" {
                 sent_messages += 1;
