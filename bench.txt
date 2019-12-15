@@ -52,3 +52,28 @@ jeee string tables total size 17165185
 real	0m26.738s
 user	1m43.926s
 sys	0m3.128s
+
+
+
+$ ./osmconvert --out-statistics albania-latest.osm.pbf 
+timestamp min: 2006-12-02T06:20:17Z
+timestamp max: 2019-12-09T21:10:00Z
+lon min: 12.2403364
+lon max: 23.3262014
+lat min: 35.8223957
+lat max: 45.8046357
+nodes: 5692037
+ways: 358336
+relations: 2274
+node id min: 15459891
+node id max: 7045016391
+way id min: 3192359
+way id max: 754089089
+relation id min: 53292
+relation id max: 10390828
+keyval pairs max: 457
+keyval pairs max object: relation 53292
+noderefs max: 1933
+noderefs max object: way 519689979
+relrefs max: 2620
+relrefs max object: relation 9350128
