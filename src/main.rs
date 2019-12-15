@@ -8,7 +8,7 @@ use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use crossbeam_channel::{bounded, unbounded};
 use crossbeam_utils::thread;
 use memmap::MmapOptions;
-use osm_pbf::{Blob, BlobHeader, DenseInfo, DenseNodes, Info, Node, PrimitiveBlock, Relation, Way};
+use osm_pbf::{Blob, BlobHeader, DenseNodes, Info, Node, PrimitiveBlock, Relation, Way};
 use quick_protobuf::{BytesReader, MessageRead};
 use std::cmp::{max, min};
 use std::fs::File;
@@ -27,6 +27,10 @@ struct OsmStats {
     nodes: u64,
     ways: u64,
     relations: u64,
+    lon_min: f64,
+    lon_max: f64,
+    lat_min: f64,
+    lat_max: f64,
 }
 
 fn main() {
@@ -115,6 +119,18 @@ fn do_processing(filename: &std::ffi::OsStr, thread_count: usize) -> Result<Stri
             osm_stats.relations += worker_stats.relations;
             osm_stats.timestamp_max = max(osm_stats.timestamp_max, worker_stats.timestamp_max);
             osm_stats.timestamp_min = min(osm_stats.timestamp_min, worker_stats.timestamp_min);
+            if worker_stats.lat_max > osm_stats.lat_max {
+                osm_stats.lat_max = worker_stats.lat_max
+            }
+            if worker_stats.lat_min < osm_stats.lat_min {
+                osm_stats.lat_min = worker_stats.lat_min
+            }
+            if worker_stats.lon_max > osm_stats.lon_max {
+                osm_stats.lon_max = worker_stats.lon_max
+            }
+            if worker_stats.lon_min < osm_stats.lon_min {
+                osm_stats.lon_min = worker_stats.lon_min
+            }
             received_messages += 1;
         }
         Ok(format!("{:#?}", osm_stats))
@@ -152,50 +168,107 @@ fn handle_block(mut osm_stats: &mut OsmStats, blob: &Blob, buffer: &mut Vec<u8>)
 }
 
 fn handle_primitive_block(mut osm_stats: &mut OsmStats, block: &PrimitiveBlock) {
-    let date_granularity = block.date_granularity as i64;
     for primitive in &block.primitivegroup {
+        if let Some(dense_nodes) = &primitive.dense {
+            handle_dense_nodes(&mut osm_stats, &dense_nodes, &block);
+        }
         for node in &primitive.nodes {
-            handle_node(&mut osm_stats, &node, date_granularity);
+            handle_node(&mut osm_stats, &node, &block);
         }
         for way in &primitive.ways {
-            handle_way(&mut osm_stats, &way, date_granularity);
+            handle_way(&mut osm_stats, &way, &block);
         }
         for relation in &primitive.relations {
-            handle_relation(&mut osm_stats, &relation, date_granularity);
+            handle_relation(&mut osm_stats, &relation, &block);
         }
     }
 }
 
-fn handle_node(mut osm_stats: &mut OsmStats, node: &Node, date_granularity: i64) {
+fn handle_dense_nodes(
+    mut osm_stats: &mut OsmStats,
+    dense_nodes: &DenseNodes,
+    primitive: &PrimitiveBlock,
+) {
+    osm_stats.nodes += dense_nodes.id.len() as u64;
+    if let Some(dense_info) = &dense_nodes.denseinfo {
+        let mut last_timestamp = 0;
+        for delta_timestamp in &dense_info.timestamp {
+            let timestamp = last_timestamp + delta_timestamp;
+            handle_timestamp(&mut osm_stats, timestamp, primitive.date_granularity);
+            last_timestamp = timestamp;
+        }
+    }
+    let mut last_latitude = 0;
+    for delta_latitude in &dense_nodes.lat {
+        let latitude = last_latitude + delta_latitude;
+        handle_latitude(&mut osm_stats, latitude, &primitive);
+        last_latitude = latitude;
+    }
+    let mut last_longitude = 0;
+    for delta_longitude in &dense_nodes.lon {
+        let longitude = last_longitude + delta_longitude;
+        handle_longitude(&mut osm_stats, longitude, &primitive);
+        last_longitude = longitude;
+    }
+}
+
+fn handle_node(mut osm_stats: &mut OsmStats, node: &Node, primitive: &PrimitiveBlock) {
     osm_stats.nodes += 1;
     if let Some(info) = &node.info {
-        handle_info(&mut osm_stats, &info, date_granularity)
+        handle_info(&mut osm_stats, &info, primitive.date_granularity)
     }
+    handle_latitude(&mut osm_stats, node.lat, &primitive);
+    handle_longitude(&mut osm_stats, node.lon, &primitive);
 }
 
-fn handle_way(mut osm_stats: &mut OsmStats, way: &Way, date_granularity: i64) {
+fn handle_way(mut osm_stats: &mut OsmStats, way: &Way, primitive: &PrimitiveBlock) {
     osm_stats.ways += 1;
     if let Some(info) = &way.info {
-        handle_info(&mut osm_stats, &info, date_granularity)
+        handle_info(&mut osm_stats, &info, primitive.date_granularity)
     }
 }
 
-fn handle_relation(mut osm_stats: &mut OsmStats, relation: &Relation, date_granularity: i64) {
+fn handle_relation(mut osm_stats: &mut OsmStats, relation: &Relation, primitive: &PrimitiveBlock) {
     osm_stats.relations += 1;
     if let Some(info) = &relation.info {
-        handle_info(&mut osm_stats, &info, date_granularity)
+        handle_info(&mut osm_stats, &info, primitive.date_granularity)
     }
 }
 
-fn handle_info(osm_stats: &mut OsmStats, info: &Info, date_granularity: i64) {
+fn handle_info(mut osm_stats: &mut OsmStats, info: &Info, date_granularity: i32) {
     if let Some(timestamp) = info.timestamp {
-        let millisec_stamp = timestamp * date_granularity;
-        if millisec_stamp < osm_stats.timestamp_min {
-            osm_stats.timestamp_min = millisec_stamp
-        }
-        if millisec_stamp > osm_stats.timestamp_max {
-            osm_stats.timestamp_max = millisec_stamp
-        }
+        handle_timestamp(&mut osm_stats, timestamp, date_granularity);
+    }
+}
+
+fn handle_timestamp(osm_stats: &mut OsmStats, timestamp: i64, date_granularity: i32) {
+    let millisec_stamp = timestamp * (date_granularity as i64);
+    if millisec_stamp < osm_stats.timestamp_min {
+        osm_stats.timestamp_min = millisec_stamp
+    }
+    if millisec_stamp > osm_stats.timestamp_max {
+        osm_stats.timestamp_max = millisec_stamp
+    }
+}
+
+fn handle_latitude(osm_stats: &mut OsmStats, latitude: i64, primitive: &PrimitiveBlock) {
+    let latitude_f =
+        0.000000001 * ((primitive.lat_offset + ((primitive.granularity as i64) * latitude)) as f64);
+    if latitude_f < osm_stats.lat_min {
+        osm_stats.lat_min = latitude_f
+    }
+    if latitude_f > osm_stats.lat_max {
+        osm_stats.lat_max = latitude_f
+    }
+}
+fn handle_longitude(osm_stats: &mut OsmStats, longitude: i64, primitive: &PrimitiveBlock) {
+    let longitude_f = 0.000000001
+        * ((primitive.lon_offset + ((primitive.granularity as i64) * longitude)) as f64);
+    if longitude_f < osm_stats.lon_min {
+        osm_stats.lon_min = longitude_f
+    }
+    if longitude_f > osm_stats.lon_max {
+        osm_stats.lon_max = longitude_f
     }
 }
 
@@ -206,5 +279,9 @@ fn empty_osm_stats() -> OsmStats {
         timestamp_max: std::i64::MIN,
         timestamp_min: std::i64::MAX,
         ways: 0,
+        lat_min: 100.0,
+        lat_max: -100.0,
+        lon_max: -200.0,
+        lon_min: 200.0,
     }
 }
