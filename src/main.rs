@@ -47,18 +47,19 @@ fn do_processing(filename: &std::ffi::OsStr, thread_count: usize) -> Result<Stri
             let cloned_return_sender = return_sender.clone();
             s.spawn(move |_| {
                 let mut buffer = Vec::with_capacity(MAX_DECOMPRESSED_BLOB_SIZE as usize);
+                let mut size_sum = 0 as u64;
                 loop {
                     match cloned_receiver.recv() {
                         Ok(blob) => {
-                            let size = handle_block(&blob, &mut buffer);
+                            size_sum += handle_block(&blob, &mut buffer) as u64;
                             buffer.clear();
-                            cloned_return_sender
-                                .send(size as u64)
-                                .expect("failed to send size result");
                         }
                         Err(_e) => break,
                     }
                 }
+                cloned_return_sender
+                    .send(size_sum)
+                    .expect("failed to send size result");
             });
         }
 
@@ -97,7 +98,7 @@ fn do_processing(filename: &std::ffi::OsStr, thread_count: usize) -> Result<Stri
 
         let mut received_messages = 0;
         let mut sizes = 0;
-        while received_messages < sent_messages {
+        while received_messages < thread_count {
             sizes += return_received.recv().unwrap();
             received_messages += 1;
         }
