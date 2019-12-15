@@ -1,4 +1,5 @@
 extern crate jemallocator;
+extern crate num_cpus;
 extern crate quick_protobuf;
 
 mod osm_pbf;
@@ -15,20 +16,19 @@ use std::fs::File;
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
 const WORK_BOUND: usize = 4000;
-const THREAD_COUNT: i64 = 4;
 const MAX_COMPRESSED_BLOB_SIZE: i32 = 64 * 1024;
 const MAX_DECOMPRESSED_BLOB_SIZE: i32 = 32 * 1024 * 1024;
 
 fn main() {
     let args: Vec<_> = std::env::args_os().collect();
     let filename = &args[1];
-    match do_processing(filename) {
+    match do_processing(filename, num_cpus::get()) {
         Ok(result) => println!("{}", result),
         Err(err) => println!("{}", err),
     }
 }
 
-fn do_processing(filename: &std::ffi::OsStr) -> Result<String, String> {
+fn do_processing(filename: &std::ffi::OsStr, thread_count: usize) -> Result<String, String> {
     let file_handle = File::open(filename).or(Err("unable to open file"))?;
     let mmap = unsafe {
         MmapOptions::new()
@@ -42,7 +42,7 @@ fn do_processing(filename: &std::ffi::OsStr) -> Result<String, String> {
     let (return_sender, return_received) = unbounded::<u64>();
 
     thread::scope(|s| {
-        for _ in 0..THREAD_COUNT {
+        for _ in 0..thread_count {
             let cloned_receiver = receiver.clone();
             let cloned_return_sender = return_sender.clone();
             s.spawn(move |_| {
