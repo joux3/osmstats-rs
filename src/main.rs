@@ -12,6 +12,8 @@ use osm_pbf::{Blob, BlobHeader, DenseNodes, Info, Node, PrimitiveBlock, Relation
 use quick_protobuf::{BytesReader, MessageRead};
 use std::cmp::{max, min};
 use std::fs::File;
+use std::panic;
+use std::process;
 
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
@@ -36,6 +38,14 @@ struct OsmStats {
 fn main() {
     let args: Vec<_> = std::env::args_os().collect();
     let filename = &args[1];
+
+    let orig_handler = panic::take_hook();
+    panic::set_hook(Box::new(move |panic_info| {
+        let handler = &orig_handler;
+        handler(panic_info);
+        process::exit(1);
+    }));
+
     match do_processing(filename, num_cpus::get()) {
         Ok(result) => println!("{}", result),
         Err(err) => println!("{}", err),
