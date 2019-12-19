@@ -4,7 +4,6 @@ extern crate quick_protobuf;
 
 mod osm_pbf;
 
-use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use crossbeam_channel::{bounded, unbounded};
 use crossbeam_utils::thread;
 use memmap::MmapOptions;
@@ -88,11 +87,7 @@ fn do_processing(filename: &std::ffi::OsStr, thread_count: usize) -> Result<Stri
         }
 
         loop {
-            let header_size = match reader.read_sfixed32(bytes).map(|value| {
-                let mut buf = [0; 4];
-                LittleEndian::write_i32(&mut buf, value);
-                BigEndian::read_i32(&buf)
-            }) {
+            let header_size = match reader.read_sfixed32(bytes).map(|value| value.swap_bytes()) {
                 Ok(size) if size > MAX_COMPRESSED_BLOB_SIZE => {
                     return Err("invalid data, compressed blob too large".to_string())
                 }
